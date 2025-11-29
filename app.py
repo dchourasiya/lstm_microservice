@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, Form
+from fastapi.responses import HTMLResponse
 import numpy as np
 import joblib
 
@@ -38,34 +38,39 @@ model.load_state_dict(torch.load("lstm_temp_model.pth", map_location=torch.devic
 model.eval()
 
 # ------------------------------
-# API Request Body
-# ------------------------------
-class SequenceInput(BaseModel):
-    sequence: list   # must contain 30 scaled values
-
-# ------------------------------
-# FASTAPI App
+# FastAPI app
 # ------------------------------
 app = FastAPI()
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 def home():
-    return {"message": "LSTM Temperature Forecast API is running"}
+    return """
+    <h2>LSTM Temperature Prediction</h2>
+    <p>Enter 30 comma-separated scaled values:</p>
 
-@app.post("/predict")
-def predict(data: SequenceInput):
+    <form action="/predict_web" method="post">
+        <textarea name="sequence" rows="5" cols="60"></textarea><br><br>
+        <input type="submit" value="Predict Temperature">
+    </form>
+    """
 
-    # Convert list → numpy → tensor
-    seq = np.array(data.sequence).reshape(1, 30, 1)
-    seq_tensor = torch.tensor(seq, dtype=torch.float32)
+@app.post("/predict_web", response_class=HTMLResponse)
+def predict_web(sequence: str = Form(...)):
+    try:
+        values = [float(x.strip()) for x in sequence.split(",")]
 
-    # Model prediction (scaled)
-    with torch.no_grad():
-        pred_scaled = model(seq_tensor).numpy()
+        if len(values) != 30:
+            return "<h3>Error: You must enter exactly 30 values.</h3>"
 
-    # Convert back to Celsius
-    pred_value = scaler.inverse_transform(pred_scaled)[0][0]
+        seq = np.array(values).reshape(1, 30, 1)
+        seq_tensor = torch.tensor(seq, dtype=torch.float32)
 
-    return {
-        "prediction_celsius": float(pred_value)
-    }
+        with torch.no_grad():
+            pred_scaled = model(seq_tensor).numpy()
+
+        pred_value = scaler.inverse_transform(pred_scaled)[0][0]
+
+        return f"<h3>Predicted Temperature: {pred_value:.4f} °C</h3>"
+
+    except:
+        return "<h3>Error: Invalid input format. Please enter numbers separated by commas.</h3>"
